@@ -1,0 +1,15 @@
+[book]
+authors = ["Mehdi Baneshi"]
+language = "en"
+src = "src"
+title = "Nexus Documentation"
+description = "Home Command Center — Discovery + Config Management + AI"
+
+[build]
+build-dir = "../../target/book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/mbaneshi/nexus"
+edit-url-template = "https://github.com/mbaneshi/nexus/edit/main/docs/book/src/{path}"

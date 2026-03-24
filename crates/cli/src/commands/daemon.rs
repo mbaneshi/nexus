@@ -4,6 +4,7 @@ use crate::DaemonAction;
 use color_eyre::eyre;
 use nexus_core::config::Config;
 use rusqlite::Connection;
+use std::sync::{Arc, Mutex};
 
 pub fn run(
     conn: &Connection,
@@ -86,7 +87,7 @@ fn status(json: bool) -> eyre::Result<()> {
 fn run_foreground(
     conn: &Connection,
     watch_paths: Vec<String>,
-    _db_path: String,
+    db_path: String,
     debounce: u64,
 ) -> eyre::Result<()> {
     let paths: Vec<std::path::PathBuf> = watch_paths.into_iter().map(Into::into).collect();
@@ -96,16 +97,39 @@ fn run_foreground(
         debounce_secs: debounce,
     };
 
+    // Open a separate DB connection for the watcher thread
+    let db_conn = if db_path.is_empty() {
+        nexus_core::db::open(&nexus_core::config::DatabaseConfig::default())?
+    } else {
+        nexus_core::db::open(&nexus_core::config::DatabaseConfig {
+            path: Some(std::path::PathBuf::from(&db_path)),
+            ..Default::default()
+        })?
+    };
+    let db = Arc::new(Mutex::new(db_conn));
+
     eprintln!("Nexus daemon running (press Ctrl+C to stop)...");
 
-    let _handle = nexus_watcher::watch(&watcher_config, move |change| {
-        // Log changes to database
-        let path_str = change.path.to_string_lossy().to_string();
-        tracing::info!(
-            path = %path_str,
-            change_type = %change.change_type.as_str(),
-            "file change detected"
-        );
+    let _handle = nexus_watcher::watch(&watcher_config, {
+        let db = Arc::clone(&db);
+        move |change| {
+            let path_str = change.path.to_string_lossy().to_string();
+            tracing::info!(
+                path = %path_str,
+                change_type = %change.change_type.as_str(),
+                "file change detected"
+            );
+
+            // Persist change to database
+            if let Ok(conn) = db.lock() {
+                if let Err(e) = nexus_core::db::record_change(&conn, &change) {
+                    tracing::warn!(error = %e, "failed to record change");
+                }
+
+                // Auto-snapshot: if change is in a known config tool directory
+                auto_snapshot_if_config(&conn, &path_str);
+            }
+        }
     })?;
 
     // Store PID
@@ -122,7 +146,6 @@ fn run_foreground(
     })
     .ok();
 
-    // If ctrlc handler didn't work, just park the thread
     match rx.recv() {
         Ok(()) => {}
         Err(_) => std::thread::park(),
@@ -133,4 +156,30 @@ fn run_foreground(
     let _ = conn; // keep conn alive
 
     Ok(())
+}
+
+/// If a changed file belongs to a known config tool, auto-snapshot that tool.
+fn auto_snapshot_if_config(conn: &Connection, path: &str) {
+    // Look up if path belongs to a config tool
+    let result: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT id, config_dir FROM config_tools WHERE ?1 LIKE config_dir || '%'",
+            [path],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+
+    if let Some((tool_id, config_dir)) = result {
+        let config_path = std::path::Path::new(&config_dir);
+        if config_path.exists() {
+            match nexus_configs::create_snapshot(conn, Some(tool_id), Some("auto"), config_path) {
+                Ok(id) => {
+                    tracing::info!(snapshot_id = id, tool_id = tool_id, "auto-snapshot created");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "auto-snapshot failed");
+                }
+            }
+        }
+    }
 }

@@ -18,3 +18,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 rusqlite = { workspace = true }
+nexus-watcher = { path = "../watcher" }
+dirs = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

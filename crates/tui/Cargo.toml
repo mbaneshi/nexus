@@ -14,3 +14,6 @@ ratatui = { workspace = true }
 crossterm = { workspace = true }
 tracing = { workspace = true }
 rusqlite = { workspace = true }
+syntect = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }

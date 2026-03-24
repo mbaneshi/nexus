@@ -59,6 +59,13 @@ enum Commands {
         action: ConfigAction,
     },
 
+    /// Show recent filesystem changes detected by the daemon
+    Changes {
+        /// Maximum number of changes to show
+        #[arg(short, long, default_value = "50")]
+        limit: usize,
+    },
+
     /// Manage the filesystem watcher daemon
     Daemon {
         #[command(subcommand)]
@@ -125,6 +132,19 @@ enum ConfigAction {
     Profile {
         #[command(subcommand)]
         action: ProfileAction,
+    },
+
+    /// Export configs as a portable tar.gz archive
+    Export {
+        /// Output file path
+        #[arg(short, long, default_value = "nexus-configs.tar.gz")]
+        output: String,
+    },
+
+    /// Import configs from a tar.gz archive
+    Import {
+        /// Archive file path
+        file: String,
     },
 
     /// Initialize nexus config at ~/.config/nexus/config.toml
@@ -213,6 +233,7 @@ fn main() -> eyre::Result<()> {
             limit,
         } => commands::search::run(&conn, &query, category.as_deref(), limit, cli.json),
         Commands::Stats => commands::stats::run(&conn, cli.json),
+        Commands::Changes { limit } => commands::changes::run(&conn, limit, cli.json),
         Commands::Config { action } => commands::config::run(&conn, action, cli.json),
         Commands::Daemon { action } => commands::daemon::run(&conn, &config, action, cli.json),
         Commands::Ask { question } => commands::ask::run(&conn, &config, &question),

@@ -1,6 +1,10 @@
-//! Axum REST API server for Nexus.
+//! Axum REST API server for Nexus with embedded SvelteKit frontend.
 
 mod routes;
+mod static_files;
+
+#[cfg(test)]
+mod tests;
 
 use axum::Router;
 use nexus_core::Result;
@@ -22,13 +26,22 @@ pub fn api_router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Build the full router with API + embedded frontend.
+pub fn full_router(state: AppState) -> Router {
+    Router::new()
+        .nest("/api", routes::routes())
+        .with_state(state)
+        .fallback(static_files::static_handler)
+        .layer(CorsLayer::permissive())
+}
+
 /// Start the server on the given host and port.
 pub async fn run(host: &str, port: u16, db: Connection) -> Result<()> {
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
     };
 
-    let app = api_router(state);
+    let app = full_router(state);
     let addr = format!("{host}:{port}");
 
     tracing::info!("Nexus server listening on http://{addr}");

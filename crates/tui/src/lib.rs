@@ -1,9 +1,11 @@
 //! TUI dashboard for Nexus — ratatui terminal interface.
 //!
-//! Four screens: Overview, Configs, Search, AI Chat.
+//! Four screens: Overview, Configs, Search, Changes.
 //! Message-passing architecture: Event → update → draw.
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+mod screens;
+
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use nexus_core::Result;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -15,6 +17,7 @@ pub enum Screen {
     Overview,
     Configs,
     Search,
+    Changes,
 }
 
 /// Main TUI application state.
@@ -22,6 +25,12 @@ pub struct App {
     screen: Screen,
     should_quit: bool,
     db: Connection,
+    show_help: bool,
+    // Screen-specific state
+    overview: screens::overview::OverviewState,
+    configs: screens::configs::ConfigsState,
+    search: screens::search::SearchState,
+    changes: screens::changes::ChangesState,
 }
 
 impl App {
@@ -30,7 +39,22 @@ impl App {
         Self {
             screen: Screen::Overview,
             should_quit: false,
+            show_help: false,
+            overview: screens::overview::OverviewState::default(),
+            configs: screens::configs::ConfigsState::default(),
+            search: screens::search::SearchState::default(),
+            changes: screens::changes::ChangesState::default(),
             db,
+        }
+    }
+
+    /// Load data for the current screen.
+    fn refresh(&mut self) {
+        match self.screen {
+            Screen::Overview => screens::overview::refresh(&self.db, &mut self.overview),
+            Screen::Configs => screens::configs::refresh(&self.db, &mut self.configs),
+            Screen::Search => {} // search is on-demand
+            Screen::Changes => screens::changes::refresh(&self.db, &mut self.changes),
         }
     }
 }
@@ -39,6 +63,7 @@ impl App {
 pub fn run(db: Connection) -> Result<()> {
     let mut terminal = ratatui::init();
     let mut app = App::new(db);
+    app.refresh();
 
     while !app.should_quit {
         terminal
@@ -52,13 +77,7 @@ pub fn run(db: Connection) -> Result<()> {
                 event::read().map_err(|e| nexus_core::NexusError::Internal(e.to_string()))?
             {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Char('1') => app.screen = Screen::Overview,
-                        KeyCode::Char('2') => app.screen = Screen::Configs,
-                        KeyCode::Char('3') => app.screen = Screen::Search,
-                        _ => {}
-                    }
+                    handle_key(&mut app, key.code, key.modifiers);
                 }
             }
         }
@@ -68,106 +87,157 @@ pub fn run(db: Connection) -> Result<()> {
     Ok(())
 }
 
+fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Global keys
+    if app.show_help {
+        app.show_help = false;
+        return;
+    }
+
+    // If in search input mode, route to search handler first
+    if app.screen == Screen::Search && app.search.input_active {
+        screens::search::handle_key(&mut app.search, &app.db, code, modifiers);
+        return;
+    }
+
+    match code {
+        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+        KeyCode::Char('?') => app.show_help = true,
+        KeyCode::Char('1') => {
+            app.screen = Screen::Overview;
+            app.refresh();
+        }
+        KeyCode::Char('2') => {
+            app.screen = Screen::Configs;
+            app.refresh();
+        }
+        KeyCode::Char('3') => {
+            app.screen = Screen::Search;
+        }
+        KeyCode::Char('4') => {
+            app.screen = Screen::Changes;
+            app.refresh();
+        }
+        KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.refresh();
+        }
+        _ => {
+            // Delegate to screen-specific handler
+            match app.screen {
+                Screen::Overview => {}
+                Screen::Configs => {
+                    screens::configs::handle_key(&mut app.configs, &app.db, code);
+                }
+                Screen::Search => {
+                    screens::search::handle_key(&mut app.search, &app.db, code, modifiers);
+                }
+                Screen::Changes => {
+                    screens::changes::handle_key(&mut app.changes, code);
+                }
+            }
+        }
+    }
+}
+
 fn draw(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(frame.area());
 
     // Tab bar
-    let tabs = Tabs::new(vec!["[1] Overview", "[2] Configs", "[3] Search"])
+    let tab_titles = vec![
+        "[1] Overview",
+        "[2] Configs",
+        "[3] Search",
+        "[4] Changes",
+    ];
+    let tabs = Tabs::new(tab_titles)
         .block(Block::bordered().title(" Nexus "))
         .highlight_style(Style::default().fg(Color::Cyan).bold())
         .select(match app.screen {
             Screen::Overview => 0,
             Screen::Configs => 1,
             Screen::Search => 2,
+            Screen::Changes => 3,
         });
     frame.render_widget(tabs, chunks[0]);
 
     // Content
     match app.screen {
-        Screen::Overview => draw_overview(frame, chunks[1], app),
-        Screen::Configs => draw_configs(frame, chunks[1], app),
-        Screen::Search => draw_search(frame, chunks[1]),
+        Screen::Overview => screens::overview::draw(frame, chunks[1], &app.overview),
+        Screen::Configs => screens::configs::draw(frame, chunks[1], &app.configs),
+        Screen::Search => screens::search::draw(frame, chunks[1], &app.search),
+        Screen::Changes => screens::changes::draw(frame, chunks[1], &app.changes),
+    }
+
+    // Help bar
+    let help_text = match app.screen {
+        Screen::Overview => "q: quit | 1-4: tabs | Ctrl+R: refresh | ?: help",
+        Screen::Configs => {
+            if app.configs.viewing_file {
+                "Esc: back | j/k: scroll | q: quit"
+            } else {
+                "j/k: navigate | Enter: view file | q: quit | 1-4: tabs"
+            }
+        }
+        Screen::Search => {
+            if app.search.input_active {
+                "Enter: search | Esc: cancel | type query..."
+            } else {
+                "/: search | j/k: navigate | q: quit | 1-4: tabs"
+            }
+        }
+        Screen::Changes => "j/k: navigate | q: quit | 1-4: tabs",
+    };
+    let help = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(help, chunks[2]);
+
+    // Help overlay
+    if app.show_help {
+        draw_help_overlay(frame);
     }
 }
 
-fn draw_overview(frame: &mut Frame, area: Rect, app: &App) {
-    let stats = nexus_discovery::home_stats(&app.db).unwrap_or(nexus_core::models::HomeStats {
-        total_files: 0,
-        total_dirs: 0,
-        total_size: 0,
-        by_category: vec![],
-        last_scan: None,
-    });
+fn draw_help_overlay(frame: &mut Frame) {
+    let area = frame.area();
+    let popup = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Min(14),
+            Constraint::Percentage(20),
+        ])
+        .split(area);
+    let popup = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Min(40),
+            Constraint::Percentage(20),
+        ])
+        .split(popup[1]);
 
-    let text = vec![
-        Line::from(format!("  Files: {}", stats.total_files)),
-        Line::from(format!("  Directories: {}", stats.total_dirs)),
-        Line::from(format!(
-            "  Total Size: {}",
-            nexus_core::output::format_size(stats.total_size)
-        )),
+    let help_text = vec![
+        Line::from("Keybindings").style(Style::default().bold()),
         Line::from(""),
-        Line::from("  Press 'q' to quit, 1-3 to switch tabs"),
+        Line::from("  1-4       Switch tabs"),
+        Line::from("  j/k       Navigate up/down"),
+        Line::from("  Enter     Select / expand"),
+        Line::from("  Esc       Back / close"),
+        Line::from("  /         Start search (Search tab)"),
+        Line::from("  Ctrl+R    Refresh data"),
+        Line::from("  ?         Toggle this help"),
+        Line::from("  q         Quit"),
+        Line::from(""),
+        Line::from("Press any key to close"),
     ];
 
-    let paragraph = Paragraph::new(text).block(Block::bordered().title(" Home Overview "));
-    frame.render_widget(paragraph, area);
-}
-
-fn draw_configs(frame: &mut Frame, area: Rect, app: &App) {
-    let mut stmt = app
-        .db
-        .prepare("SELECT name, config_dir, language FROM config_tools ORDER BY name")
-        .ok();
-
-    let tool_data: Vec<(String, String, String)> = stmt
-        .as_mut()
-        .and_then(|s| {
-            s.query_map([], |row: &rusqlite::Row<'_>| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2).unwrap_or_default(),
-                ))
-            })
-            .ok()
-        })
-        .map(|r| {
-            r.filter_map(|r: std::result::Result<(String, String, String), _>| r.ok())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let rows: Vec<Row> = tool_data
-        .iter()
-        .map(|(name, dir, lang)| {
-            Row::new(vec![
-                Cell::from(name.as_str()),
-                Cell::from(dir.as_str()),
-                Cell::from(lang.as_str()),
-            ])
-        })
-        .collect();
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(15),
-            Constraint::Min(30),
-            Constraint::Length(10),
-        ],
-    )
-    .header(Row::new(vec!["Tool", "Path", "Language"]).style(Style::default().bold()))
-    .block(Block::bordered().title(" Config Tools "));
-
-    frame.render_widget(table, area);
-}
-
-fn draw_search(frame: &mut Frame, area: Rect) {
-    let paragraph = Paragraph::new("  Search coming soon — use CLI: nexus search <query>")
-        .block(Block::bordered().title(" Search "));
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Clear, popup[1]);
+    let block = Paragraph::new(help_text).block(Block::bordered().title(" Help "));
+    frame.render_widget(block, popup[1]);
 }

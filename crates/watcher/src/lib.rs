@@ -11,3 +11,6 @@ pub use daemon::{
     stop_daemon,
 };
 pub use watcher::{WatchHandle, WatcherConfig, watch};
+
+#[cfg(test)]
+mod tests;

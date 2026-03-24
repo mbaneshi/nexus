@@ -197,6 +197,53 @@ CREATE INDEX IF NOT EXISTS idx_changes_detected ON file_changes(detected_at);
 CREATE INDEX IF NOT EXISTS idx_snapshots_tool ON config_snapshots(tool_id);
 "#;
 
+/// Record a file change in the database.
+pub fn record_change(conn: &Connection, change: &crate::models::FileChange) -> Result<()> {
+    conn.execute(
+        "INSERT INTO file_changes (path, change_type, detected_at, old_size, new_size)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            change.path.to_string_lossy().as_ref(),
+            change.change_type.as_str(),
+            change.detected_at,
+            change.old_size.map(|s| s as i64),
+            change.new_size.map(|s| s as i64),
+        ],
+    )?;
+    Ok(())
+}
+
+/// List recent file changes from the database.
+pub fn list_changes(conn: &Connection, limit: usize) -> Result<Vec<crate::models::FileChange>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, change_type, detected_at, old_size, new_size
+         FROM file_changes ORDER BY detected_at DESC LIMIT ?1",
+    )?;
+
+    let changes = stmt
+        .query_map([limit as i64], |row: &rusqlite::Row<'_>| {
+            let change_type_str: String = row.get(2)?;
+            let change_type = match change_type_str.as_str() {
+                "created" => crate::models::ChangeType::Created,
+                "modified" => crate::models::ChangeType::Modified,
+                "deleted" => crate::models::ChangeType::Deleted,
+                _ => crate::models::ChangeType::Modified,
+            };
+            Ok(crate::models::FileChange {
+                id: row.get(0)?,
+                path: std::path::PathBuf::from(row.get::<_, String>(1)?),
+                change_type,
+                detected_at: row.get(3)?,
+                old_size: row.get::<_, Option<i64>>(4)?.map(|s| s as u64),
+                new_size: row.get::<_, Option<i64>>(5)?.map(|s| s as u64),
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(changes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +284,85 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn record_and_list_changes() {
+        let conn = super::open_in_memory().unwrap();
+
+        let change1 = crate::models::FileChange {
+            id: None,
+            path: std::path::PathBuf::from("/home/user/.config/nvim/init.lua"),
+            change_type: crate::models::ChangeType::Modified,
+            detected_at: 1000,
+            old_size: Some(100),
+            new_size: Some(200),
+        };
+        let change2 = crate::models::FileChange {
+            id: None,
+            path: std::path::PathBuf::from("/home/user/.config/fish/config.fish"),
+            change_type: crate::models::ChangeType::Created,
+            detected_at: 2000,
+            old_size: None,
+            new_size: Some(50),
+        };
+
+        record_change(&conn, &change1).unwrap();
+        record_change(&conn, &change2).unwrap();
+
+        let changes = list_changes(&conn, 10).unwrap();
+        assert_eq!(changes.len(), 2);
+        // Most recent first
+        assert_eq!(changes[0].detected_at, 2000);
+        assert_eq!(changes[0].change_type, crate::models::ChangeType::Created);
+        assert_eq!(changes[1].detected_at, 1000);
+        assert_eq!(changes[1].new_size, Some(200));
+    }
+
+    #[test]
+    fn list_changes_respects_limit() {
+        let conn = super::open_in_memory().unwrap();
+
+        for i in 0..10 {
+            let change = crate::models::FileChange {
+                id: None,
+                path: std::path::PathBuf::from(format!("/tmp/file{i}.txt")),
+                change_type: crate::models::ChangeType::Modified,
+                detected_at: i,
+                old_size: None,
+                new_size: None,
+            };
+            record_change(&conn, &change).unwrap();
+        }
+
+        let changes = list_changes(&conn, 3).unwrap();
+        assert_eq!(changes.len(), 3);
+    }
+
+    #[test]
+    fn all_tables_created() {
+        let conn = super::open_in_memory().unwrap();
+
+        let expected = [
+            "scans",
+            "files",
+            "config_tools",
+            "config_files",
+            "config_snapshots",
+            "snapshot_files",
+            "file_changes",
+            "ai_queries",
+        ];
+
+        for table in &expected {
+            let count: i32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "table '{table}' should exist");
+        }
     }
 }
