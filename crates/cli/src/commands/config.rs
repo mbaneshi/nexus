@@ -15,6 +15,8 @@ pub fn run(conn: &Connection, action: ConfigAction, json: bool) -> eyre::Result<
         ConfigAction::Restore { id } => restore(conn, id, json),
         ConfigAction::Diff { tool } => diff_tool(conn, &tool, json),
         ConfigAction::Profile { action } => profile(conn, action, json),
+        ConfigAction::Export { output } => export_configs(&output, json),
+        ConfigAction::Import { file } => import_configs(&file, json),
         ConfigAction::Init => init_config(),
         ConfigAction::Path => {
             println!("{}", nexus_core::config::config_path().display());
@@ -85,17 +87,49 @@ fn show_tool(conn: &Connection, tool_name: &str, json: bool) -> eyre::Result<()>
     } else {
         println!("Config files for: {tool_name}");
         println!("{}", "-".repeat(60));
+
         for f in &files {
             println!(
-                "  {} ({}, {})",
+                "\n  \x1b[1m{}\x1b[0m ({}, {})",
                 f.path.display(),
                 nexus_core::output::format_size(f.size),
                 f.language.as_deref().unwrap_or("unknown")
             );
+
+            // Show file content with syntax highlighting
+            if let Ok(content) = std::fs::read_to_string(&f.path) {
+                print_highlighted(&content, &f.path);
+            }
         }
     }
 
     Ok(())
+}
+
+fn print_highlighted(content: &str, path: &std::path::Path) {
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::ThemeSet;
+    use syntect::parsing::SyntaxSet;
+    use syntect::util::{LinesWithEndings, as_24_bit_terminal_escaped};
+
+    let ss = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let theme = &ts.themes["base16-ocean.dark"];
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let syntax = ss
+        .find_syntax_by_extension(ext)
+        .or_else(|| ss.find_syntax_by_first_line(content.lines().next().unwrap_or("")))
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
+    let mut h = HighlightLines::new(syntax, theme);
+
+    for (i, line) in LinesWithEndings::from(content).enumerate() {
+        let ranges = h.highlight_line(line, &ss).unwrap_or_default();
+        let escaped = as_24_bit_terminal_escaped(&ranges, false);
+        print!("  \x1b[90m{:4}\x1b[0m {escaped}", i + 1);
+    }
+    println!("\x1b[0m");
 }
 
 fn backup(
@@ -348,6 +382,57 @@ fn profile(conn: &Connection, action: ProfileAction, json: bool) -> eyre::Result
             Ok(())
         }
     }
+}
+
+fn export_configs(output: &str, json: bool) -> eyre::Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let tools = nexus_configs::discover_tools(&home)?;
+
+    let tool_dirs: Vec<(String, std::path::PathBuf)> = tools
+        .iter()
+        .map(|t| (t.name.clone(), t.config_dir.clone()))
+        .collect();
+
+    let output_path = std::path::Path::new(output);
+    let count = nexus_configs::export_configs(&home, &tool_dirs, output_path)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"file": output, "tools": tool_dirs.len(), "files": count})
+        );
+    } else {
+        println!(
+            "Exported {} files from {} tools to {}",
+            count,
+            tool_dirs.len(),
+            output
+        );
+    }
+
+    Ok(())
+}
+
+fn import_configs(file: &str, json: bool) -> eyre::Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let archive_path = std::path::Path::new(file);
+
+    if !archive_path.exists() {
+        return Err(eyre::eyre!("File not found: {}", file));
+    }
+
+    let count = nexus_configs::import_configs(archive_path, &home)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"file": file, "files_imported": count})
+        );
+    } else {
+        println!("Imported {count} files from {file}");
+    }
+
+    Ok(())
 }
 
 fn init_config() -> eyre::Result<()> {

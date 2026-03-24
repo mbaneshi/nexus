@@ -6,12 +6,14 @@
 
 mod backup;
 mod diff;
+mod export;
 mod profile;
 mod registry;
 mod scanner;
 
 pub use backup::{create_snapshot, list_snapshots, restore_snapshot};
 pub use diff::{DiffEntry, DiffStatus, diff_snapshot, diff_snapshots, file_content_diff};
+pub use export::{export_configs, import_configs};
 pub use profile::{Profile, apply_profile, delete_profile, list_profiles, save_profile};
 pub use registry::discover_tools;
 pub use scanner::scan_tool_files;
