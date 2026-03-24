@@ -28,3 +28,4 @@ serde_json = { workspace = true }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
+ctrlc = "3"

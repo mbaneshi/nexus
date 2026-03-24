@@ -59,6 +59,12 @@ enum Commands {
         action: ConfigAction,
     },
 
+    /// Manage the filesystem watcher daemon
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+
     /// Ask AI a question about your filesystem
     Ask {
         /// Your question
@@ -109,11 +115,79 @@ enum ConfigAction {
         id: i64,
     },
 
+    /// Diff current config vs last snapshot
+    Diff {
+        /// Tool name
+        tool: String,
+    },
+
+    /// Manage config profiles for machine provisioning
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
+
     /// Initialize nexus config at ~/.config/nexus/config.toml
     Init,
 
     /// Show nexus config file path
     Path,
+}
+
+#[derive(Subcommand)]
+enum ProfileAction {
+    /// Save current configs as a named profile
+    Save {
+        /// Profile name
+        name: String,
+
+        /// Description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+
+    /// List all saved profiles
+    List,
+
+    /// Apply a profile (restore all tool configs)
+    Apply {
+        /// Profile name
+        name: String,
+    },
+
+    /// Delete a profile
+    Delete {
+        /// Profile name
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the daemon in the background
+    Start,
+
+    /// Stop the running daemon
+    Stop,
+
+    /// Show daemon status
+    Status,
+
+    /// Run the daemon in the foreground (used internally)
+    #[command(hide = true)]
+    Run {
+        /// Paths to watch
+        #[arg(long)]
+        watch: Vec<String>,
+
+        /// Database path
+        #[arg(long, default_value = "")]
+        db_path: String,
+
+        /// Debounce seconds
+        #[arg(long, default_value = "5")]
+        debounce: u64,
+    },
 }
 
 fn main() -> eyre::Result<()> {
@@ -140,6 +214,7 @@ fn main() -> eyre::Result<()> {
         } => commands::search::run(&conn, &query, category.as_deref(), limit, cli.json),
         Commands::Stats => commands::stats::run(&conn, cli.json),
         Commands::Config { action } => commands::config::run(&conn, action, cli.json),
+        Commands::Daemon { action } => commands::daemon::run(&conn, &config, action, cli.json),
         Commands::Ask { question } => commands::ask::run(&conn, &config, &question),
         Commands::Tui => {
             nexus_tui::run(conn)?;

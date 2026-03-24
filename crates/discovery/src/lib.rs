@@ -10,3 +10,6 @@ mod searcher;
 pub use indexer::index;
 pub use scanner::scan;
 pub use searcher::{home_stats, search};
+
+#[cfg(test)]
+mod tests;

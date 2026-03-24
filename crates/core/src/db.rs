@@ -32,6 +32,15 @@ pub fn open(config: &DatabaseConfig) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Open an in-memory database (for testing).
+pub fn open_in_memory() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    let config = DatabaseConfig::default();
+    configure(&conn, &config)?;
+    migrate(&conn)?;
+    Ok(conn)
+}
+
 /// Apply performance pragmas.
 fn configure(conn: &Connection, config: &DatabaseConfig) -> Result<()> {
     conn.execute_batch(&format!(
