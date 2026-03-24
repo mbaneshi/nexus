@@ -261,6 +261,13 @@ pub struct ToolDefinition {
 /// All known config tools.
 pub const KNOWN_TOOLS: &[ToolDefinition] = &[
     ToolDefinition {
+        name: "alacritty",
+        config_path: ".config/alacritty",
+        file_patterns: &["alacritty.toml", "alacritty.yml"],
+        language: "toml",
+        description: "GPU-accelerated terminal",
+    },
+    ToolDefinition {
         name: "atuin",
         config_path: ".config/atuin",
         file_patterns: &["config.toml"],
@@ -317,11 +324,32 @@ pub const KNOWN_TOOLS: &[ToolDefinition] = &[
         description: "Git terminal UI",
     },
     ToolDefinition {
+        name: "helix",
+        config_path: ".config/helix",
+        file_patterns: &["config.toml", "languages.toml", "themes/*.toml"],
+        language: "toml",
+        description: "Post-modern text editor",
+    },
+    ToolDefinition {
         name: "katana",
         config_path: ".config/katana",
         file_patterns: &["*.toml", "*.json"],
         language: "toml",
         description: "Katana",
+    },
+    ToolDefinition {
+        name: "kitty",
+        config_path: ".config/kitty",
+        file_patterns: &["kitty.conf", "*.conf"],
+        language: "conf",
+        description: "GPU-based terminal emulator",
+    },
+    ToolDefinition {
+        name: "lazygit",
+        config_path: ".config/lazygit",
+        file_patterns: &["config.yml", "state.yml"],
+        language: "yaml",
+        description: "Terminal UI for git",
     },
     ToolDefinition {
         name: "mise",
@@ -371,6 +399,13 @@ pub const KNOWN_TOOLS: &[ToolDefinition] = &[
         file_patterns: &["config.toml"],
         language: "toml",
         description: "Stripe CLI",
+    },
+    ToolDefinition {
+        name: "tmux",
+        config_path: ".config/tmux",
+        file_patterns: &["tmux.conf", "*.conf"],
+        language: "conf",
+        description: "Tmux terminal multiplexer",
     },
     ToolDefinition {
         name: "uv",

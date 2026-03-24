@@ -103,12 +103,20 @@ pub fn import_configs(archive_path: &Path, home: &Path) -> Result<u32> {
             Err(_) => continue,
         };
 
-        let path = match entry.path() {
-            Ok(p) => home.join(p),
+        let rel = match entry.path() {
+            Ok(p) => p.into_owned(),
             Err(_) => continue,
         };
 
-        // Security: prevent path traversal
+        // Security: reject any path containing ".." components
+        if rel.components().any(|c| c == std::path::Component::ParentDir) {
+            tracing::warn!(path = %rel.display(), "skipping path with traversal component");
+            continue;
+        }
+
+        let path = home.join(&rel);
+
+        // Security: belt-and-suspenders check after joining
         if !path.starts_with(home) {
             tracing::warn!(path = %path.display(), "skipping path outside home");
             continue;

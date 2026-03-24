@@ -128,6 +128,164 @@ fn test_diff_snapshot_added_and_removed() {
 }
 
 #[test]
+fn test_export_configs_creates_archive() {
+    let dir = create_mock_config_home();
+    let home = dir.path();
+    let output_dir = TempDir::new().unwrap();
+    let archive_path = output_dir.path().join("configs.tar.gz");
+
+    let tool_dirs = vec![
+        ("nvim".to_string(), home.join(".config/nvim")),
+        ("git".to_string(), home.join(".config/git")),
+    ];
+
+    let count = crate::export_configs(home, &tool_dirs, &archive_path).unwrap();
+    assert_eq!(count, 3, "should export 3 files (init.lua + config + ignore)");
+    assert!(archive_path.exists(), "archive file should exist");
+
+    let meta = fs::metadata(&archive_path).unwrap();
+    assert!(meta.len() > 0, "archive should not be empty");
+}
+
+#[test]
+fn test_import_configs_restores_files() {
+    let dir = create_mock_config_home();
+    let home = dir.path();
+    let output_dir = TempDir::new().unwrap();
+    let archive_path = output_dir.path().join("configs.tar.gz");
+
+    let tool_dirs = vec![
+        ("nvim".to_string(), home.join(".config/nvim")),
+        ("git".to_string(), home.join(".config/git")),
+    ];
+
+    crate::export_configs(home, &tool_dirs, &archive_path).unwrap();
+
+    // Import into a fresh directory
+    let import_home = TempDir::new().unwrap();
+    let count = crate::import_configs(&archive_path, import_home.path()).unwrap();
+    assert_eq!(count, 3, "should import 3 files");
+
+    // Verify files exist and have correct content
+    let init_lua = import_home.path().join(".config/nvim/init.lua");
+    assert!(init_lua.exists(), "init.lua should be restored");
+    assert_eq!(
+        fs::read_to_string(&init_lua).unwrap(),
+        "-- nvim config\nvim.opt.number = true"
+    );
+
+    let git_config = import_home.path().join(".config/git/config");
+    assert!(git_config.exists(), "git config should be restored");
+    assert_eq!(
+        fs::read_to_string(&git_config).unwrap(),
+        "[user]\n  name = Test"
+    );
+
+    let git_ignore = import_home.path().join(".config/git/ignore");
+    assert!(git_ignore.exists(), "git ignore should be restored");
+    assert_eq!(
+        fs::read_to_string(&git_ignore).unwrap(),
+        "*.swp\n.DS_Store"
+    );
+}
+
+#[test]
+fn test_import_configs_rejects_path_traversal() {
+    // Build a malicious archive with a path traversal entry by writing raw tar bytes.
+    // The `tar` crate's `append_data` rejects `..`, so we construct the header manually.
+    let archive_dir = TempDir::new().unwrap();
+    let archive_path = archive_dir.path().join("evil.tar.gz");
+
+    {
+        let file = fs::File::create(&archive_path).unwrap();
+        let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut out = std::io::BufWriter::new(gz);
+
+        let content = b"malicious content";
+        let path_bytes = b"../../../etc/passwd";
+
+        // Build a minimal 512-byte POSIX tar header
+        let mut header = [0u8; 512];
+        header[..path_bytes.len()].copy_from_slice(path_bytes);
+        // File mode "0000644\0"
+        header[100..108].copy_from_slice(b"0000644\0");
+        // Owner/group uid/gid "0000000\0"
+        header[108..116].copy_from_slice(b"0000000\0");
+        header[116..124].copy_from_slice(b"0000000\0");
+        // File size in octal, 11 chars + NUL
+        let size_octal = format!("{:011o}\0", content.len());
+        header[124..136].copy_from_slice(size_octal.as_bytes());
+        // Mtime "00000000000\0"
+        header[136..148].copy_from_slice(b"00000000000\0");
+        // Typeflag '0' = regular file
+        header[156] = b'0';
+
+        // Compute checksum: sum of all bytes with checksum field treated as spaces
+        header[148..156].copy_from_slice(b"        ");
+        let cksum: u32 = header.iter().map(|&b| b as u32).sum();
+        let cksum_str = format!("{:06o}\0 ", cksum);
+        header[148..156].copy_from_slice(&cksum_str.as_bytes()[..8]);
+
+        use std::io::Write;
+        out.write_all(&header).unwrap();
+        out.write_all(content).unwrap();
+        // Pad to 512-byte boundary
+        let padding = 512 - (content.len() % 512);
+        if padding < 512 {
+            out.write_all(&vec![0u8; padding]).unwrap();
+        }
+        // Two zero blocks to end archive
+        out.write_all(&[0u8; 1024]).unwrap();
+
+        let gz = out.into_inner().unwrap();
+        gz.finish().unwrap();
+    }
+
+    let import_home = TempDir::new().unwrap();
+    let count = crate::import_configs(&archive_path, import_home.path()).unwrap();
+    assert_eq!(count, 0, "path traversal entries should be rejected");
+}
+
+#[test]
+fn test_export_import_round_trip() {
+    let dir = create_mock_config_home();
+    let home = dir.path();
+    let archive_dir = TempDir::new().unwrap();
+    let archive_path = archive_dir.path().join("round-trip.tar.gz");
+
+    let tool_dirs = vec![
+        ("nvim".to_string(), home.join(".config/nvim")),
+        ("git".to_string(), home.join(".config/git")),
+    ];
+
+    let export_count = crate::export_configs(home, &tool_dirs, &archive_path).unwrap();
+
+    let import_home = TempDir::new().unwrap();
+    let import_count = crate::import_configs(&archive_path, import_home.path()).unwrap();
+    assert_eq!(
+        export_count, import_count,
+        "import count should match export count"
+    );
+
+    // Verify every original file matches its imported copy
+    let original_files = [
+        (".config/nvim/init.lua", "-- nvim config\nvim.opt.number = true"),
+        (".config/git/config", "[user]\n  name = Test"),
+        (".config/git/ignore", "*.swp\n.DS_Store"),
+    ];
+
+    for (rel_path, expected_content) in &original_files {
+        let imported = import_home.path().join(rel_path);
+        assert!(imported.exists(), "{rel_path} should exist after import");
+        let content = fs::read_to_string(&imported).unwrap();
+        assert_eq!(
+            &content, expected_content,
+            "content mismatch for {rel_path}"
+        );
+    }
+}
+
+#[test]
 fn test_profile_save_list_delete() {
     let dir = create_mock_config_home();
     let conn = nexus_core::db::open_in_memory().unwrap();

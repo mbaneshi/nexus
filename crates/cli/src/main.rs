@@ -78,6 +78,9 @@ enum Commands {
         question: String,
     },
 
+    /// Start MCP (Model Context Protocol) server on stdio
+    Mcp,
+
     /// Launch TUI dashboard
     Tui,
 
@@ -237,6 +240,7 @@ fn main() -> eyre::Result<()> {
         Commands::Config { action } => commands::config::run(&conn, action, cli.json),
         Commands::Daemon { action } => commands::daemon::run(&conn, &config, action, cli.json),
         Commands::Ask { question } => commands::ask::run(&conn, &config, &question),
+        Commands::Mcp => commands::mcp::run(&conn),
         Commands::Tui => {
             nexus_tui::run(conn)?;
             Ok(())
