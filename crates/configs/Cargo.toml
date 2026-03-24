@@ -1,0 +1,16 @@
+[package]
+name = "nexus-configs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Config file manager for ~/.config tools: browse, backup, diff, restore"
+
+[dependencies]
+nexus-core = { workspace = true }
+blake3 = { workspace = true }
+flate2 = { workspace = true }
+tracing = { workspace = true }
+syntect = { workspace = true }
+rusqlite = { workspace = true }
+dirs = { workspace = true }

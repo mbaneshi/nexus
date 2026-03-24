@@ -1,0 +1,30 @@
+[package]
+name = "nexus-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CLI binary for Nexus — home command center"
+
+[[bin]]
+name = "nexus"
+path = "src/main.rs"
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-discovery = { workspace = true }
+nexus-configs = { workspace = true }
+nexus-watcher = { workspace = true }
+nexus-ai = { workspace = true }
+nexus-tui = { workspace = true }
+nexus-server = { workspace = true }
+clap = { workspace = true }
+color-eyre = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }

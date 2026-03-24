@@ -1,0 +1,16 @@
+[package]
+name = "nexus-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "TUI dashboard for Nexus — ratatui terminal interface"
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-discovery = { workspace = true }
+nexus-configs = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }

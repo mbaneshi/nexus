@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+*.profraw
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database (local dev)
+*.db
+*.db-wal
+*.db-shm
+
+# Coverage
+lcov.info

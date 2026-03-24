@@ -1,0 +1,17 @@
+[package]
+name = "nexus-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "AI integration via Claude API for natural language filesystem queries"
+
+[dependencies]
+nexus-core = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+rusqlite = { workspace = true }
